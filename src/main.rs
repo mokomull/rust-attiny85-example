@@ -10,9 +10,10 @@ use avr_device::interrupt;
 use avr_device::interrupt::{free, Mutex};
 
 extern crate attiny85_hal as hal;
+use embedded_hal::digital::v2::ToggleableOutputPin;
 use hal::port::{
     mode::{Input, Output, PullUp},
-    portb::{PB0, PB3},
+    portb::{PB0, PB3, PB4},
 };
 
 use hal::prelude::*;
@@ -37,6 +38,8 @@ static BYPASS_SWITCH: Mutex<RefCell<Option<BypassSwitch>>> = Mutex::new(RefCell:
 pub type TimerMutex = Mutex<RefCell<Option<Timer>>>;
 static BYPASS_DEBOUNCE_TIMER: TimerMutex = Mutex::new(RefCell::new(None));
 static BYPASS_HOLD_TIMER: TimerMutex = Mutex::new(RefCell::new(None));
+
+static TIMER_WIGGLE: Mutex<RefCell<Option<PB4<Output>>>> = Mutex::new(RefCell::new(None));
 
 static DEBOUNCE_TIME_MS: u8 = 7;
 // Note that this is scaled by 10 so as not to overflow!
@@ -76,6 +79,7 @@ fn main() -> ! {
         &BYPASS_DEBOUNCE_TIMER,
         &BYPASS_HOLD_TIMER,
     );
+    let wiggle = portb.pb4.into_output(&mut portb.ddr);
 
     free(|cs| {
         BYPASS_SWITCH.borrow(cs).replace(Some(bypass));
@@ -85,6 +89,8 @@ fn main() -> ! {
         BYPASS_HOLD_TIMER
             .borrow(cs)
             .replace(Some(bypass_debounce_timer));
+
+        TIMER_WIGGLE.borrow(cs).replace(Some(wiggle));
     });
 
     unsafe { avr_device::interrupt::enable() };
@@ -102,6 +108,14 @@ fn TIMER0_COMPA() {
         let mut bypass_hold_timer_ref = BYPASS_HOLD_TIMER.borrow(cs).borrow_mut();
         let bypass_hold_timer = bypass_hold_timer_ref.as_mut().unwrap();
         bypass_hold_timer.tick();
+
+        TIMER_WIGGLE
+            .borrow(cs)
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .toggle()
+            .unwrap();
     })
 }
 
