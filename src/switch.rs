@@ -40,9 +40,9 @@ where
     pub fn on_change(&mut self) {
         free(|cs| {
             let mut debounce_timer_ref = self.debounce_timer.borrow(cs).borrow_mut();
-            let debounce_timer = debounce_timer_ref.as_mut().unwrap();
+            let debounce_timer = unsafe { debounce_timer_ref.assume_init_mut() };
             let mut hold_timer_ref = self.hold_timer.borrow(cs).borrow_mut();
-            let hold_timer = hold_timer_ref.as_mut().unwrap();
+            let hold_timer = unsafe { hold_timer_ref.assume_init_mut() };
 
             let pressed = self.is_pressed();
 

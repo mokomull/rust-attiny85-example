@@ -1,4 +1,6 @@
 #![feature(llvm_asm)]
+#![feature(maybe_uninit_extra)]
+#![feature(maybe_uninit_ref)]
 #![no_main]
 #![no_std]
 #![feature(abi_avr_interrupt)]
@@ -22,6 +24,7 @@ use hal::entry;
 
 use cell::RefCell;
 use core::cell;
+use core::mem::MaybeUninit;
 
 mod switch;
 use switch::Switch;
@@ -32,11 +35,12 @@ use timer::Timer;
 extern crate embedded_hal;
 
 type BypassSwitch = Switch<PB3<Input<PullUp>>, PB0<Output>>;
-static BYPASS_SWITCH: Mutex<RefCell<Option<BypassSwitch>>> = Mutex::new(RefCell::new(None));
+static BYPASS_SWITCH: Mutex<RefCell<MaybeUninit<BypassSwitch>>> =
+    Mutex::new(RefCell::new(MaybeUninit::uninit()));
 
-pub type TimerMutex = Mutex<RefCell<Option<Timer>>>;
-static BYPASS_DEBOUNCE_TIMER: TimerMutex = Mutex::new(RefCell::new(None));
-static BYPASS_HOLD_TIMER: TimerMutex = Mutex::new(RefCell::new(None));
+pub type TimerMutex = Mutex<RefCell<MaybeUninit<Timer>>>;
+static BYPASS_DEBOUNCE_TIMER: TimerMutex = Mutex::new(RefCell::new(MaybeUninit::uninit()));
+static BYPASS_HOLD_TIMER: TimerMutex = Mutex::new(RefCell::new(MaybeUninit::uninit()));
 
 static DEBOUNCE_TIME_MS: u8 = 7;
 // Note that this is scaled by 10 so as not to overflow!
@@ -78,13 +82,15 @@ fn main() -> ! {
     );
 
     free(|cs| {
-        BYPASS_SWITCH.borrow(cs).replace(Some(bypass));
+        BYPASS_SWITCH.borrow(cs).borrow_mut().write(bypass);
         BYPASS_DEBOUNCE_TIMER
             .borrow(cs)
-            .replace(Some(bypass_hold_timer));
+            .borrow_mut()
+            .write(bypass_hold_timer);
         BYPASS_HOLD_TIMER
             .borrow(cs)
-            .replace(Some(bypass_debounce_timer));
+            .borrow_mut()
+            .write(bypass_debounce_timer);
     });
 
     unsafe { avr_device::interrupt::enable() };
@@ -96,11 +102,11 @@ fn main() -> ! {
 fn TIMER0_COMPA() {
     free(|cs| {
         let mut bypass_debounce_timer_ref = BYPASS_DEBOUNCE_TIMER.borrow(cs).borrow_mut();
-        let bypass_debounce_timer = bypass_debounce_timer_ref.as_mut().unwrap();
+        let bypass_debounce_timer = unsafe { bypass_debounce_timer_ref.assume_init_mut() };
         bypass_debounce_timer.tick();
 
         let mut bypass_hold_timer_ref = BYPASS_HOLD_TIMER.borrow(cs).borrow_mut();
-        let bypass_hold_timer = bypass_hold_timer_ref.as_mut().unwrap();
+        let bypass_hold_timer = unsafe { bypass_hold_timer_ref.assume_init_mut() };
         bypass_hold_timer.tick();
     })
 }
@@ -109,7 +115,7 @@ fn TIMER0_COMPA() {
 fn PCINT0() {
     free(|cs| {
         let mut bypass_ref = BYPASS_SWITCH.borrow(cs).borrow_mut();
-        let bypass = bypass_ref.as_mut().unwrap();
+        let bypass = unsafe { bypass_ref.assume_init_mut() };
         bypass.on_change();
     })
 }
